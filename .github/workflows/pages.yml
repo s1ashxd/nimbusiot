@@ -34,8 +34,8 @@ jobs:
         run: pnpm --filter @nimbus/web build
         env:
           VITE_BASE_PATH: /nimbusiot/
-          VITE_API_BASE: http://64.188.91.33:8080/api/v1
-          VITE_WS_URL: ws://64.188.91.33:8080/ws
+          VITE_API_BASE: https://nimbusiot.duckdns.org/api/v1
+          VITE_WS_URL: wss://nimbusiot.duckdns.org/ws
 
       - name: Add 404 fallback for SPA routing
         run: cp apps/web/dist/index.html apps/web/dist/404.html
