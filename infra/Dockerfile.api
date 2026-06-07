@@ -1,0 +1,42 @@
+# syntax=docker/dockerfile:1.7
+
+FROM node:22-alpine AS build
+RUN apk add --no-cache libc6-compat openssl
+RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+WORKDIR /src
+
+COPY pnpm-workspace.yaml package.json tsconfig.base.json ./
+COPY apps/api/package.json apps/api/
+COPY apps/web/package.json apps/web/
+COPY packages/shared-types/package.json packages/shared-types/
+
+RUN pnpm install --no-frozen-lockfile
+
+COPY packages ./packages
+COPY apps/api ./apps/api
+
+WORKDIR /src/apps/api
+RUN pnpm exec prisma generate
+RUN pnpm exec nest build
+
+FROM node:22-alpine AS runtime
+RUN apk add --no-cache libc6-compat openssl tini wget
+RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY --from=build /src/pnpm-workspace.yaml ./pnpm-workspace.yaml
+COPY --from=build /src/package.json ./package.json
+COPY --from=build /src/tsconfig.base.json ./tsconfig.base.json
+COPY --from=build /src/node_modules ./node_modules
+COPY --from=build /src/packages ./packages
+COPY --from=build /src/apps/api/package.json ./apps/api/package.json
+COPY --from=build /src/apps/api/dist ./apps/api/dist
+COPY --from=build /src/apps/api/prisma ./apps/api/prisma
+COPY --from=build /src/apps/api/node_modules ./apps/api/node_modules
+
+WORKDIR /app/apps/api
+
+EXPOSE 3000
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["sh", "-c", "pnpm exec prisma db push --accept-data-loss --skip-generate && node dist/seed.js && node dist/main.js"]

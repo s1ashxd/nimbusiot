@@ -1,0 +1,227 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum DeviceType {
+  thermo
+  light
+  lock
+  camera
+  motion
+  smoke
+  energy
+  fan
+  hub
+}
+
+enum DeviceStatus {
+  online
+  warn
+  err
+  offline
+}
+
+enum AlertLevel {
+  err
+  warn
+  info
+  ok
+}
+
+enum AlertStatus {
+  firing
+  ack
+  resolved
+}
+
+enum ActivityScope {
+  device
+  system
+  network
+  user
+  automation
+}
+
+model User {
+  id             String        @id @default(uuid()) @db.Uuid
+  email          String        @unique
+  passwordHash   String
+  fullName       String
+  avatar         String?
+  createdAt      DateTime      @default(now())
+  roles          UserRole[]
+  ackedAlerts    Alert[]       @relation("AckBy")
+  resolvedAlerts Alert[]       @relation("ResolveBy")
+  activity       ActivityLog[]
+
+  @@map("users")
+}
+
+model Role {
+  id          String     @id
+  description String
+  users       UserRole[]
+
+  @@map("roles")
+}
+
+model UserRole {
+  userId String @db.Uuid
+  roleId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id])
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model Room {
+  id      String   @id
+  name    String   @unique
+  floor   String?
+  area    Int?
+  devices Device[]
+
+  @@map("rooms")
+}
+
+model Device {
+  id          String        @id
+  name        String
+  type        DeviceType
+  roomId      String
+  status      DeviceStatus  @default(online)
+  battery     Int?
+  signal      Int           @default(5)
+  valueText   String        @default("")
+  unit        String        @default("")
+  fw          String        @default("0.0.0")
+  warnText    String?
+  lastSeenAt  DateTime      @default(now())
+  config      Json          @default("{}")
+  createdAt   DateTime      @default(now())
+  room        Room          @relation(fields: [roomId], references: [id])
+  telemetry   Telemetry[]
+  alerts      Alert[]
+  ruleActions RuleAction[]
+  activity    ActivityLog[]
+
+  @@index([status])
+  @@index([roomId])
+  @@map("devices")
+}
+
+model Telemetry {
+  id       BigInt   @id @default(autoincrement())
+  ts       DateTime @default(now())
+  deviceId String
+  metric   String
+  value    Float
+  device   Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, metric, ts(sort: Desc)])
+  @@map("telemetry")
+}
+
+model Alert {
+  id             String       @id @default(uuid()) @db.Uuid
+  deviceId       String?
+  level          AlertLevel
+  title          String
+  description    String
+  status         AlertStatus  @default(firing)
+  startedAt      DateTime     @default(now())
+  acknowledgedAt DateTime?
+  acknowledgedBy String?      @db.Uuid
+  resolvedAt     DateTime?
+  resolvedBy     String?      @db.Uuid
+  device         Device?      @relation(fields: [deviceId], references: [id])
+  ackUser        User?        @relation("AckBy", fields: [acknowledgedBy], references: [id])
+  resolveUser    User?        @relation("ResolveBy", fields: [resolvedBy], references: [id])
+  events         AlertEvent[]
+
+  @@index([status, startedAt(sort: Desc)])
+  @@map("alerts")
+}
+
+model AlertEvent {
+  id      String   @id @default(uuid()) @db.Uuid
+  alertId String   @db.Uuid
+  event   String
+  comment String?
+  actorId String?  @db.Uuid
+  at      DateTime @default(now())
+  alert   Alert    @relation(fields: [alertId], references: [id], onDelete: Cascade)
+
+  @@map("alert_events")
+}
+
+model Scene {
+  id        String           @id @default(uuid()) @db.Uuid
+  name      String
+  icon      String
+  color     String
+  enabled   Boolean          @default(true)
+  createdAt DateTime         @default(now())
+  rules     AutomationRule[]
+
+  @@map("scenes")
+}
+
+model AutomationRule {
+  id         String       @id @default(uuid()) @db.Uuid
+  sceneId    String?      @db.Uuid
+  name       String
+  trigger    Json
+  conditions Json
+  enabled    Boolean      @default(true)
+  priority   Int          @default(100)
+  scene      Scene?       @relation(fields: [sceneId], references: [id], onDelete: SetNull)
+  actions    RuleAction[]
+
+  @@map("automation_rules")
+}
+
+model RuleAction {
+  id             String         @id @default(uuid()) @db.Uuid
+  ruleId         String         @db.Uuid
+  ord            Int
+  targetDeviceId String?
+  kind           String
+  payload        Json
+  rule           AutomationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  device         Device?        @relation(fields: [targetDeviceId], references: [id], onDelete: SetNull)
+
+  @@map("rule_actions")
+}
+
+model ActivityLog {
+  id       BigInt        @id @default(autoincrement())
+  ts       DateTime      @default(now())
+  level    AlertLevel
+  scope    ActivityScope
+  deviceId String?
+  actorId  String?       @db.Uuid
+  message  String
+  device   Device?       @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  actor    User?         @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([ts(sort: Desc)])
+  @@index([scope, ts(sort: Desc)])
+  @@map("activity_log")
+}
+
+model Integration {
+  id        String   @id @default(uuid()) @db.Uuid
+  kind      String   @unique
+  enabled   Boolean  @default(false)
+  config    Json     @default("{}")
+  updatedAt DateTime @updatedAt
+
+  @@map("integrations")
+}

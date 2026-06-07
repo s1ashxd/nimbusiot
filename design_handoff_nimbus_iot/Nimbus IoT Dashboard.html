@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<title>Nimbus IoT — панель управления</title>
+<meta name="viewport" content="width=1440" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="icons.jsx"></script>
+<script type="text/babel" src="data.jsx"></script>
+<script type="text/babel" src="charts.jsx"></script>
+<script type="text/babel" src="shell.jsx"></script>
+<script type="text/babel" src="pages-overview.jsx"></script>
+<script type="text/babel" src="pages-devices.jsx"></script>
+<script type="text/babel" src="pages-misc.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+
+<script type="text/babel">
+const { useState, useEffect, useMemo } = React;
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "accent": "#22c55e",
+  "fontSize": 14,
+  "radius": 10,
+  "live": true
+}/*EDITMODE-END*/;
+
+const ACCENTS = {
+  "#00d4ff": "Cyan (по умолчанию)",
+  "#22c55e": "Green",
+  "#a78bfa": "Violet",
+  "#f97316": "Orange",
+  "#fbbf24": "Amber",
+  "#ec4899": "Pink",
+};
+
+function App() {
+  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const [route, setRoute] = useState("overview");
+  const [deviceId, setDeviceId] = useState(null);
+  const [now, setNow] = useState(() => fmtTime(new Date()));
+
+  useEffect(() => {
+    if (!t.live) return;
+    const id = setInterval(() => setNow(fmtTime(new Date())), 4000);
+    return () => clearInterval(id);
+  }, [t.live]);
+
+  // apply theme + accent
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.theme = t.theme;
+    root.dataset.density = t.density;
+    root.style.setProperty("--accent", t.accent);
+    // soft accent ~ accent + low alpha
+    root.style.setProperty("--accent-soft", hexToRgba(t.accent, 0.13));
+    root.style.fontSize = (t.fontSize) + "px";
+    root.style.setProperty("--r-md", t.radius + "px");
+    root.style.setProperty("--r-sm", Math.max(4, t.radius - 4) + "px");
+    root.style.setProperty("--r-lg", (t.radius + 4) + "px");
+  }, [t.theme, t.accent, t.density, t.fontSize, t.radius]);
+
+  const openDevice = (id) => {
+    setDeviceId(id || "DEV-A1F2");
+    setRoute("device");
+  };
+  const back = () => setRoute("devices");
+
+  const Pages = window.Pages;
+  const alertCount = window.MOCK.ALERTS.filter(a => !a.ack).length;
+
+  const Page = (() => {
+    switch (route) {
+      case "overview":   return <Pages.Overview onOpenDevice={openDevice} />;
+      case "devices":    return <Pages.Devices onOpenDevice={openDevice} />;
+      case "device":     return <Pages.DeviceDetail deviceId={deviceId} onBack={back} />;
+      case "automation": return <Pages.Automation />;
+      case "alerts":     return <Pages.Alerts />;
+      case "users":      return <Pages.Users />;
+      case "settings":   return <Pages.Settings />;
+      default:           return <Pages.Overview onOpenDevice={openDevice} />;
+    }
+  })();
+
+  return (
+    <div className="app">
+      <window.Shell.Sidebar route={route === "device" ? "devices" : route} setRoute={setRoute} alertCount={alertCount} />
+      <window.Shell.Topbar route={route} onRefresh={() => setNow(fmtTime(new Date()))} lastUpdate={now} />
+      <main className="main">{Page}</main>
+
+      <TweaksPanel>
+        <TweakSection label="Тема" />
+        <TweakRadio label="Тема" value={t.theme} options={[["dark","Тёмная"],["light","Светлая"]]}
+          onChange={v => setTweak("theme", v)} />
+        <TweakSection label="Акцентный цвет" />
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {Object.keys(ACCENTS).map(c => (
+            <button key={c} onClick={() => setTweak("accent", c)} title={ACCENTS[c]}
+              style={{
+                width: 26, height: 26, borderRadius: 7, background: c,
+                border: t.accent === c ? "2px solid #fff" : "1px solid rgba(0,0,0,0.2)",
+                boxShadow: t.accent === c ? `0 0 0 2px ${c}55` : "none",
+              }} />
+          ))}
+        </div>
+        <TweakSection label="Плотность интерфейса" />
+        <TweakRadio label="Плотность" value={t.density}
+          options={[["compact","Плотно"],["regular","Норма"],["comfy","Просторно"]]}
+          onChange={v => setTweak("density", v)} />
+        <TweakSection label="Тонкая настройка" />
+        <TweakSlider label="Размер шрифта" value={t.fontSize} min={12} max={18} unit="px"
+          onChange={v => setTweak("fontSize", v)} />
+        <TweakSlider label="Скругление" value={t.radius} min={2} max={20} unit="px"
+          onChange={v => setTweak("radius", v)} />
+        <TweakToggle label="Live-обновление" value={t.live} onChange={v => setTweak("live", v)} />
+      </TweaksPanel>
+    </div>
+  );
+}
+
+function fmtTime(d) {
+  return d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+function hexToRgba(hex, a) {
+  const m = hex.replace("#","");
+  const r = parseInt(m.slice(0,2), 16);
+  const g = parseInt(m.slice(2,4), 16);
+  const b = parseInt(m.slice(4,6), 16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>

@@ -1,0 +1,97 @@
+name: nimbus-iot
+
+x-restart: &restart
+  restart: unless-stopped
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+services:
+
+  web:
+    <<: [*restart, *logging]
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.web
+    container_name: nimbus-web
+    ports:
+      - "${WEB_HOST_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_started
+
+  api:
+    <<: [*restart, *logging]
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    container_name: nimbus-api
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_TTL: ${JWT_TTL:-24h}
+      INGEST_TOKEN: ${INGEST_TOKEN}
+      NIMBUS_DATA_SOURCE: ${NIMBUS_DATA_SOURCE:-mock}
+      MOCK_SEED: ${MOCK_SEED:-42}
+      MOCK_RATE: ${MOCK_RATE:-1.0}
+      MOCK_ENABLED: ${MOCK_ENABLED:-true}
+      HUB_LATITUDE: ${HUB_LATITUDE:-55.75}
+      HUB_LONGITUDE: ${HUB_LONGITUDE:-37.62}
+      OPEN_METEO_BASE: ${OPEN_METEO_BASE:-https://api.open-meteo.com}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 60s
+
+  postgres:
+    <<: [*restart, *logging]
+    image: postgres:16-alpine
+    container_name: nimbus-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    <<: [*restart, *logging]
+    image: redis:7-alpine
+    container_name: nimbus-redis
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  default:
+    name: nimbus_default
+    driver: bridge
